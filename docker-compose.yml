@@ -1,0 +1,84 @@
+services:
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_ROOT_PASSWORD: root_password_change_me
+      MYSQL_DATABASE: hrms_db
+      MYSQL_USER: hrms
+      MYSQL_PASSWORD: hrms_password
+    ports: ["3306:3306"]
+    volumes: [mysql_data:/var/lib/mysql]
+    healthcheck:
+      test: ["CMD","mysqladmin","ping","-h","localhost","-proot_password_change_me"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+    healthcheck:
+      test: ["CMD","redis-cli","ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+  backend:
+    build: ./backend
+    environment:
+      DATABASE_URL: mysql+pymysql://hrms:hrms_password@mysql:3306/hrms_db
+      JWT_SECRET: ${JWT_SECRET:-replace_with_a_long_random_secret_before_deployment}
+      REDIS_URL: redis://redis:6379/0
+      HRMS_DOCUMENT_DIR: /app/private_documents
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-hrms@localhost}
+      SMTP_STARTTLS: ${SMTP_STARTTLS:-true}
+    ports: ["8000:8000"]
+    volumes: [hrms_documents:/app/private_documents]
+    depends_on:
+      mysql: {condition: service_healthy}
+      redis: {condition: service_healthy}
+  celery_worker:
+    build: ./backend
+    command: ["celery","-A","app.services.celery_app.celery_app","worker","--loglevel=INFO"]
+    environment:
+      DATABASE_URL: mysql+pymysql://hrms:hrms_password@mysql:3306/hrms_db
+      REDIS_URL: redis://redis:6379/0
+      HRMS_DOCUMENT_DIR: /app/private_documents
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-hrms@localhost}
+      SMTP_STARTTLS: ${SMTP_STARTTLS:-true}
+    volumes: [hrms_documents:/app/private_documents]
+    depends_on:
+      mysql: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      backend: {condition: service_started}
+  celery_beat:
+    build: ./backend
+    command: ["celery","-A","app.services.celery_app.celery_app","beat","--loglevel=INFO"]
+    environment:
+      DATABASE_URL: mysql+pymysql://hrms:hrms_password@mysql:3306/hrms_db
+      REDIS_URL: redis://redis:6379/0
+      HRMS_DOCUMENT_DIR: /app/private_documents
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-hrms@localhost}
+      SMTP_STARTTLS: ${SMTP_STARTTLS:-true}
+    depends_on:
+      redis: {condition: service_healthy}
+      backend: {condition: service_started}
+  frontend:
+    build: ./frontend
+    ports: ["5173:5173"]
+    environment:
+      VITE_API_URL: http://localhost:8000
+    depends_on: [backend]
+volumes:
+  mysql_data:
+  hrms_documents:
